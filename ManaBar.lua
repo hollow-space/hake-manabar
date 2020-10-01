@@ -1,261 +1,333 @@
---------------------------------
---- ManaBar.lua Version 0.5 ----
---------------------------------
-
+------------------------------
+-- ManaBar.lua Version 0.7 ---
+------------------------------
 local ManaBar = {
-	OptionEnable = Menu.AddOption({"mlambers", "ManaBar"}, "1. Enable.", "Enable/Disable this script."),
-    OffsetHeight = Menu.AddOption({"mlambers", "ManaBar"}, "2. Height", "", 2, 40, 1),
-    OptionEnableManual = Menu.AddOption({"mlambers", "ManaBar"}, "3. Manual adjustment", "Enable manual setup."),
-	OffsetWidth = Menu.AddOption({"mlambers", "ManaBar"}, "4. Width", "", 20, 300, 2),
-	OffsetYPos = Menu.AddOption({"mlambers", "ManaBar"}, "5. Y position", "", -80, 80, 1),
-	OffsetXPos = Menu.AddOption({"mlambers", "ManaBar"}, "6. X position", "", -150, 150, 1)
+    ScriptEnable = Menu.AddOption(
+        {"mlambers", "ManaBar"},
+        "1. Enable",
+        "Enable/disable this script."
+    ),
+    OffsetBarHeight = Menu.AddOption(
+        {"mlambers", "ManaBar"},
+        "2. Height size",
+        "Height size of manabar.",
+        4, 40, 1
+    ),
+    ScriptEnableManualSetup = Menu.AddOption(
+        {"mlambers", "ManaBar"},
+        "3. Enable manual adjustment",
+        "Turn off automatic position adjustment."
+    ),
+    OffsetBarWidth = Menu.AddOption(
+        {"mlambers", "ManaBar"},
+        "4. Width size",
+        "Width size of manabar, only enable when manual adjustment on!",
+        20, 300, 2
+    ),
+    OffsetPosX = Menu.AddOption(
+        {"mlambers", "ManaBar"},
+        "5. X position",
+        "X position of manabar, only enable when manual adjustment on!",
+        -200, 200, 1
+    ),
+    OffsetPosY = Menu.AddOption(
+        {"mlambers", "ManaBar"},
+        "6. Y position",
+        "Y position of manabar, only enable when manual adjustment on!",
+        -100, 100, 1
+    )
 }
 
---[[
-    Localize global function from _ENV
-        math.ceil
---]]
-local MathCeil = math.ceil
-local MathFloor = math.floor
+local fFloor = math.floor
+local fCeil = math.ceil
+local nScreenWidth <const>, nScreenHeight <const> = Renderer.GetScreenSize()
 
-local MyHero = nil
-local hero_object, hero_origin = nil, nil
+local bAllowRun = nil
+local bAllowDraw = nil
 
-local bar_width, bar_height = nil, nil
-local bar_x_offset, bar_y_offset = nil, nil
-local bar_x, bar_y = nil, nil
+local nNextUpdate = 0
 
 local x_w2s, y_w2s = nil, nil
-local screen_width, screen_height = nil, nil
+local nBarWidth, nBarHeight = nil, nil
+local nBarOffsetX, nBarOffsetY = nil, nil
 
-local currBrew = nil
-local extra_padding = 0
+local hMyHero = nil
+local hLocalHero = nil
 
-local function roundToNthDecimal(num, n)
-	local mult = 10 ^ (n or 0)
-	return MathFloor(num * mult + 0.5) / mult
-end
+local hHero = nil
+local aEntityList = {}
+local vHeroOrigin = nil
+local sHeroClass = nil
+local bSearchBrew = 0
 
-function ManaBar.OnMenuOptionChange(option, old, new)
-	if MyHero == nil then return end
-    
-    if option == ManaBar.OptionEnable then
-        MyHero = nil
-        hero_object, hero_origin = nil, nil
-            
-        bar_width, bar_height = nil, nil
-        bar_x_offset, bar_y_offset = nil, nil
-        bar_x, bar_y = nil, nil
-            
-        x_w2s, y_w2s = nil, nil
-        screen_width, screen_height = nil, nil
-        
-        currBrew = nil
-        extra_padding = 0
-    end
-    
-    if option == ManaBar.OptionEnableManual then
-        bar_height = Menu.GetValue(ManaBar.OffsetHeight)
-        if old > 0 then -- From On to Off
-            bar_width = roundToNthDecimal((screen_height/480) * 45, 0)
-            
-            bar_x_offset = roundToNthDecimal(bar_width/2, 0) + 2
-            bar_y_offset = roundToNthDecimal(screen_height/480 * 9, 0)
-        else
-            bar_width = Menu.GetValue(ManaBar.OffsetWidth)
-            bar_x_offset = Menu.GetValue(ManaBar.OffsetXPos)
-            bar_y_offset = Menu.GetValue(ManaBar.OffsetYPos)
-        end
-    end
-    
-    if 
-		(option == ManaBar.OffsetWidth
-		or option == ManaBar.OffsetHeight
-		or option == ManaBar.OffsetYPos
-		or option == ManaBar.OffsetXPos)
-	then
-        bar_height = Menu.GetValue(ManaBar.OffsetHeight)
-        
-        if Menu.IsEnabled(ManaBar.OptionEnableManual) == false then return end
-		
-        bar_width = Menu.GetValue(ManaBar.OffsetWidth)
-        bar_x_offset = Menu.GetValue(ManaBar.OffsetXPos)
-		bar_y_offset = Menu.GetValue(ManaBar.OffsetYPos)
-    end
+-- Round a number to n decimal
+local function RoundNumber(num, n)
+    local mult = 10 ^ (n or 0)
+
+    return fFloor(num * mult + 0.5) / mult
 end
 
 function ManaBar.OnScriptLoad()
-	MyHero = nil
-	hero_object, hero_origin = nil, nil
-	
-    bar_width, bar_height = nil, nil
-    bar_x_offset, bar_y_offset = nil, nil
-	bar_x, bar_y = nil, nil
-    
+    hMyHero = nil
+    hLocalHero = nil
+
+    for _ in pairs(aEntityList) do
+        aEntityList[_] = nil
+    end
+    hHero = nil
+    vHeroOrigin = nil
+    sHeroClass = nil
+    bSearchBrew = 0
+
     x_w2s, y_w2s = nil, nil
-	screen_width, screen_height = nil, nil
-    
-    currBrew = nil
-    extra_padding = 0
-	
-	Console.Print("[" .. os.date("%I:%M:%S %p") .. "] - - [ ManaBar.lua ] [ Version 0.5 ] Script load.")
+    nBarWidth, nBarHeight = nil, nil
+    nBarOffsetX, nBarOffsetY = nil, nil
+
+    nNextUpdate = 0
+
+    bAllowRun = Menu.IsEnabled(ManaBar.ScriptEnable) and 1 or 0
+    bAllowDraw = 0
+
+    Log.Write("[ManaBar.lua][OnScriptLoad] Script loaded.")
 end
 
 function ManaBar.OnGameEnd()
-	MyHero = nil
-	hero_object, hero_origin = nil, nil
-	
-	bar_width, bar_height = nil, nil
-    bar_x_offset, bar_y_offset = nil, nil
-	bar_x, bar_y = nil, nil
-    
+    hMyHero = nil
+    hLocalHero = nil
+
+    for _ in pairs(aEntityList) do
+        aEntityList[_] = nil
+    end
+    hHero = nil
+    vHeroOrigin = nil
+    sHeroClass = nil
+    bSearchBrew = 0
+
     x_w2s, y_w2s = nil, nil
-	screen_width, screen_height = nil, nil
-    
-    currBrew = nil
-    extra_padding = 0
-	
-	Console.Print("[" .. os.date("%I:%M:%S %p") .. "] - - [ ManaBar.lua ] [ Version 0.5 ] Game end. Reset all variable.")
+    nBarWidth, nBarHeight = nil, nil
+    nBarOffsetX, nBarOffsetY = nil, nil
+
+    nNextUpdate = 0
+
+    bAllowRun = Menu.IsEnabled(ManaBar.ScriptEnable) and 1 or 0
+    bAllowDraw = 0
+
+    Log.Write("[ManaBar.lua][OnGameEnd] Reset variables.")
+end
+
+function ManaBar.OnMenuOptionChange(option, old, new)
+    if option == ManaBar.ScriptEnable then
+        bAllowRun = new
+
+        if Heroes.GetLocal() == nil then return end
+        hMyHero = nil
+        hLocalHero = nil
+
+        for _ in pairs(aEntityList) do
+            aEntityList[_] = nil
+        end
+        hHero = nil
+        vHeroOrigin = nil
+        sHeroClass = nil
+        bSearchBrew = 0
+
+        x_w2s, y_w2s = nil, nil
+        nBarWidth, nBarHeight = nil, nil
+        nBarOffsetX, nBarOffsetY = nil, nil
+
+        nNextUpdate = 0
+
+        bAllowDraw = 0
+    end
+
+    if Heroes.GetLocal() == nil then return end
+    if not Menu.IsEnabled(ManaBar.ScriptEnable) then return end
+
+    if option == ManaBar.ScriptEnableManualSetup then
+        nBarHeight = Menu.GetValue(ManaBar.OffsetBarHeight)
+
+        if old > 0 then -- This is from On to Off
+            nBarWidth = RoundNumber((nScreenHeight/480) * 45, 0)
+
+            nBarOffsetX = RoundNumber(nBarWidth/2, 0) + 2
+            nBarOffsetY = RoundNumber(nScreenHeight/480 * 9, 0)
+        else
+            nBarWidth = Menu.GetValue(ManaBar.OffsetBarWidth)
+
+            nBarOffsetX = Menu.GetValue(ManaBar.OffsetPosX)
+            nBarOffsetY = Menu.GetValue(ManaBar.OffsetPosY)
+        end
+    end
+
+    if
+        (
+            option == ManaBar.OffsetBarWidth
+            or option == ManaBar.OffsetBarHeight
+            or option == ManaBar.OffsetPosX
+            or option == ManaBar.OffsetPosY
+        )
+    then
+        nBarHeight = Menu.GetValue(ManaBar.OffsetBarHeight)
+
+        if not Menu.IsEnabled(ManaBar.ScriptEnableManualSetup) then return end
+
+        nBarWidth = Menu.GetValue(ManaBar.OffsetBarWidth)
+        nBarOffsetX = Menu.GetValue(ManaBar.OffsetPosX)
+        nBarOffsetY = Menu.GetValue(ManaBar.OffsetPosY)
+    end
+
 end
 
 function ManaBar.IsOnScreen(x_position, y_position)
-	if (x_position < 1) or (y_position < 1) or (x_position > screen_width) or (y_position > screen_height) then 
-		return false 
-	end
-	
-	return true
+    if
+        (x_position < 1)
+        or (y_position < 1)
+        or (x_position > nScreenWidth)
+        or (y_position > nScreenHeight)
+    then
+        return false
+    end
+
+    return true
 end
 
 function ManaBar.OnUpdate()
-	if Menu.IsEnabled(ManaBar.OptionEnable) == false then return end
-	
-	if MyHero == nil or MyHero ~= Heroes.GetLocal() then
-        screen_width, screen_height = Renderer.GetScreenSize()
+    if bAllowRun == 0 then return end
 
-        bar_width = roundToNthDecimal((screen_height/480) * 45, 0)
-		bar_height = Menu.GetValue(ManaBar.OffsetHeight)
-        
-        bar_x_offset = roundToNthDecimal(bar_width/2, 0) + 2
-        bar_y_offset = roundToNthDecimal(screen_height/480 * 9, 0)
-        
-        if Menu.IsEnabled(ManaBar.OptionEnableManual) then
-            bar_width = Menu.GetValue(ManaBar.OffsetWidth)
-            bar_x_offset = Menu.GetValue(ManaBar.OffsetXPos)
-            bar_y_offset = Menu.GetValue(ManaBar.OffsetYPos)
-        end
-        
-		bar_x, bar_y = nil, nil
-        
-        x_w2s, y_w2s = nil, nil
-        
-        hero_object, hero_origin = nil, nil
-        
-        MyHero = Heroes.GetLocal()
-        
-        currBrew = nil
-        extra_padding = 0
-		
-		Console.Print("[" .. os.date("%I:%M:%S %p") .. "] - - [ ManaBar.lua ] [ Version 0.5 ] Game started, init script done.")
-		return
-	end
-end
+    if hMyHero == nil then
+        hLocalHero = Heroes.GetLocal()
 
-local function GetCurrentBrew(hOwner)
-    for k, v in  pairs(Entities.GetAll("C_DOTA_Unit_Brewmaster_PrimalEarth")) do
-        if
-            Entity.GetOwner(v) == hOwner
-            and Entity.IsDormant(v) == false
-            and Entity.IsAlive(v)
-        then
-            return v
+        if hMyHero ~= hLocalHero then
+            hMyHero = hLocalHero
+
+            hHero = nil
+            vHeroOrigin = nil
+            sHeroClass = nil
+            bSearchBrew = 0
+
+            x_w2s, y_w2s = nil, nil
+            nBarWidth = RoundNumber((nScreenHeight/480) * 45, 0)
+            nBarHeight = Menu.GetValue(ManaBar.OffsetBarHeight)
+
+            nBarOffsetX = RoundNumber(nBarWidth/2, 0) + 2
+            nBarOffsetY =  RoundNumber(nScreenHeight/480 * 9, 0)
+
+            if Menu.IsEnabled(ManaBar.ScriptEnableManualSetup) then
+                nBarWidth = Menu.GetValue(ManaBar.OffsetBarWidth)
+
+                nBarOffsetX = Menu.GetValue(ManaBar.OffsetPosX)
+                nBarOffsetY = Menu.GetValue(ManaBar.OffsetPosY)
+            end
+
+            nNextUpdate = 0
+
+            bAllowDraw = 1
+            Log.Write("[ManaBar.lua][OnUpdate] Game started, init!")
+            return
         end
     end
-    
-    for k, v in  pairs(Entities.GetAll("C_DOTA_Unit_Brewmaster_PrimalStorm")) do
+
+    if nNextUpdate > GameRules.GetGameTime() then return end
+
+    for _ in pairs(aEntityList) do
+        aEntityList[_] = nil
+    end
+
+    bSearchBrew = 0
+
+    for i = 1, Heroes.Count() do
+        hHero = Heroes.Get(i)
+
         if
-            Entity.GetOwner(v) == hOwner
-            and Entity.IsDormant(v) == false
-            and Entity.IsAlive(v)
+            hHero ~= nil
+            and not Entity.IsDormant(hHero)
+            and Entity.IsAlive(hHero)
+            and not Entity.IsSameTeam(hMyHero, hHero)
+            and not Entity.GetField(hHero, "m_bIsIllusion")
+            and not NPC.IsIllusion(hHero)
+            and Entity.IsPlayer(Entity.GetOwner(hHero))
         then
-            return v   
+            sHeroClass = Entity.GetClassName(hHero)
+            if
+                (
+                    sHeroClass == "C_DOTA_Unit_Hero_Brewmaster"
+                    or sHeroClass == "C_DOTA_Unit_Hero_Rubick"
+                )
+                and NPC.HasModifier(hHero, "modifier_brewmaster_primal_split")
+            then
+                bSearchBrew = 1
+                goto continue
+            end
+
+            aEntityList[#aEntityList + 1] = {hHero, 0}
+
+            ::continue::
         end
     end
-    
-    for k, v in  pairs(Entities.GetAll("C_DOTA_Unit_Brewmaster_PrimalFire")) do
-        if
-            Entity.GetOwner(v) == hOwner
-            and Entity.IsDormant(v) == false
-            and Entity.IsAlive(v)
-        then
-            return v
+
+    if bSearchBrew == 1 then
+        for _, v in pairs(Entities.GetAll("C_DOTA_Unit_Brewmaster_PrimalEarth")) do
+            if
+                not Entity.IsSameTeam(hMyHero, v)
+                and not Entity.IsDormant(v)
+                and Entity.IsAlive(v)
+            then
+                aEntityList[#aEntityList + 1] = {v, RoundNumber(nBarOffsetY * 0.25, 0)}
+            end
+        end
+
+        for _, v in pairs(Entities.GetAll("C_DOTA_Unit_Brewmaster_PrimalStorm")) do
+            if
+                not Entity.IsSameTeam(hMyHero, v)
+                and not Entity.IsDormant(v)
+                and Entity.IsAlive(v)
+            then
+                aEntityList[#aEntityList + 1] = {v, RoundNumber(nBarOffsetY * 0.25, 0)}
+            end
+        end
+
+        for _, v in pairs(Entities.GetAll("C_DOTA_Unit_Brewmaster_PrimalFire")) do
+            if
+                not Entity.IsSameTeam(hMyHero, v)
+                and not Entity.IsDormant(v)
+                and Entity.IsAlive(v)
+            then
+                aEntityList[#aEntityList + 1] = {v, RoundNumber(nBarOffsetY * 0.25, 0)}
+            end
         end
     end
-    
-    return nil
+
+    nNextUpdate = GameRules.GetGameTime() + 0.12
 end
 
 function ManaBar.OnDraw()
-	if Menu.IsEnabled(ManaBar.OptionEnable) == false then return end
-	
-	if MyHero == nil then return end
-    
-	for i = 1, Heroes.Count() do
-		hero_object = Heroes.Get(i)
-		
-		if 
-			hero_object ~= nil
-			and Entity.IsDormant(hero_object) == false
-			and Entity.IsAlive(hero_object)
-			and Entity.IsSameTeam(MyHero, hero_object) == false
-			and Entity.GetField(hero_object, "m_bIsIllusion") == false
-			and NPC.IsIllusion(hero_object) == false
-			and Entity.IsPlayer(Entity.GetOwner(hero_object)) 
-		then
-            
-			hero_origin = Entity.GetAbsOrigin(hero_object)
-            hero_origin:SetZ(hero_origin:GetZ() + NPC.GetHealthBarOffset(hero_object))
-            
-            x_w2s, y_w2s = Renderer.WorldToScreen(hero_origin)
-			extra_padding = 0
-            if 
-                Entity.GetClassName(hero_object) == "C_DOTA_Unit_Hero_Brewmaster" or Entity.GetClassName(hero_object) == "C_DOTA_Unit_Hero_Rubick" and
-                NPC.HasModifier(hero_object, "modifier_brewmaster_primal_split")
-            then
-                currBrew = GetCurrentBrew(hero_object)
-                if currBrew then
-                    hero_object = currBrew
-                    
-                    hero_origin = Entity.GetAbsOrigin(hero_object)
-                    hero_origin:SetZ(hero_origin:GetZ() + NPC.GetHealthBarOffset(hero_object))
-                    
-                    x_w2s, y_w2s = Renderer.WorldToScreen(hero_origin)
-                    
-                    extra_padding = roundToNthDecimal(bar_y_offset*0.25, 0)
-                end
-            end
-			--[[
-				Need to check if target object on our screen or not.
-			--]]
-			if ManaBar.IsOnScreen(x_w2s, y_w2s) then
-				-- bar_x = x_w2s + bar_x_offset
-                bar_x = x_w2s - bar_x_offset
-				-- bar_y = y_w2s + bar_y_offset
-                bar_y = y_w2s - bar_y_offset + extra_padding
-				
-				--[[
-					Draw black background.
-				--]]
-				Renderer.SetDrawColor(0, 0, 0, 255)
-				Renderer.DrawFilledRect(bar_x, bar_y, bar_width, bar_height)
-				
-				--[[
-					Draw the actual mana bar.
-				--]]
-				Renderer.SetDrawColor(79, 120, 249, 255)
-				Renderer.DrawFilledRect((1 + bar_x), (1 + bar_y), MathCeil((bar_width - 2) * (NPC.GetMana(hero_object) /  NPC.GetMaxMana(hero_object))), (bar_height - 2))
-			end
-		end
-	end
+    if bAllowDraw == 0 then return end
+
+    for _, v in pairs(aEntityList) do
+        vHeroOrigin = Entity.GetAbsOrigin(v[1])
+        vHeroOrigin:SetZ(vHeroOrigin:GetZ() + NPC.GetHealthBarOffset(v[1]))
+        x_w2s, y_w2s = Renderer.WorldToScreen(vHeroOrigin)
+
+        if ManaBar.IsOnScreen(x_w2s, y_w2s) then
+            -- Draw black background
+            Renderer.SetDrawColor(0, 0, 0, 255)
+            Renderer.DrawFilledRect(
+                x_w2s - nBarOffsetX,
+                y_w2s - nBarOffsetY + v[2],
+                nBarWidth,
+                nBarHeight
+            )
+
+            -- Draw the actual mana bar
+            Renderer.SetDrawColor(79, 120, 249, 255)
+            Renderer.DrawFilledRect(
+                x_w2s - nBarOffsetX + 1,
+                y_w2s - nBarOffsetY + v[2] + 1,
+                fCeil((nBarWidth - 2) * (NPC.GetMana(v[1]) /  NPC.GetMaxMana(v[1]))),
+                nBarHeight - 2
+            )
+        end
+    end
 end
 
 return ManaBar
